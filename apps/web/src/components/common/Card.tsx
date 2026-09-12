@@ -2,7 +2,16 @@ import type { PropsWithChildren, ReactNode } from "react";
 import clsx from "clsx";
 
 export function Card({ children, className }: PropsWithChildren<{ className?: string }>) {
-  return <div className={clsx("rounded-xl border border-surface-border bg-surface-raised p-5", className)}>{children}</div>;
+  return (
+    <div
+      className={clsx(
+        "rounded-xl border border-white/[0.08] bg-gradient-to-b from-surface-raised to-surface-raised/60 p-5 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset,0_8px_24px_-12px_rgba(0,0,0,0.6)] backdrop-blur-sm transition-shadow",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function CardHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {

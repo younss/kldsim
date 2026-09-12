@@ -7,7 +7,20 @@
     color-scheme: dark;
   }
   body {
-    @apply bg-surface text-slate-100 antialiased;
+    @apply text-slate-100 antialiased;
+    background-color: #0b1220;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 15% -10%, rgba(33, 134, 245, 0.16), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 0%, rgba(74, 58, 167, 0.12), transparent),
+      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    background-size:
+      100% 100%,
+      100% 100%,
+      48px 48px,
+      48px 48px;
+    background-attachment: fixed;
+    min-height: 100vh;
   }
   ::selection {
     @apply bg-brand-500/40;

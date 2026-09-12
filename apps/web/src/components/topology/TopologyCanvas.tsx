@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Text, Line } from "@react-three/drei";
+import { OrbitControls, Text, Line, ContactShadows, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import type { TopologyGraph, TopologyNode, TopologyNodeHealth, TopologyEdge } from "@kldsim/shared";
 
@@ -20,22 +20,23 @@ function nodePosition(node: TopologyNode): [number, number, number] {
 function NodeGeometry({ kind }: { kind: TopologyNode["kind"] }) {
   switch (kind) {
     case "APPLICATION":
-      return <boxGeometry args={[0.55, 0.55, 0.55]} />;
+      return <boxGeometry args={[0.58, 0.58, 0.58]} />;
     case "DATA_STORE":
-      return <cylinderGeometry args={[0.32, 0.32, 0.55, 20]} />;
+      return <cylinderGeometry args={[0.32, 0.32, 0.55, 32]} />;
     case "INTEGRATION":
-      return <octahedronGeometry args={[0.4]} />;
+      return <octahedronGeometry args={[0.42, 0]} />;
     case "EXTERNAL_PARTNER":
-      return <coneGeometry args={[0.35, 0.6, 24]} />;
+      return <coneGeometry args={[0.36, 0.62, 32]} />;
     case "CAPABILITY":
     default:
-      return <icosahedronGeometry args={[0.36, 0]} />;
+      return <icosahedronGeometry args={[0.38, 1]} />;
   }
 }
 
 function NodeMesh({ node, selected, onSelect }: { node: TopologyNode; selected: boolean; onSelect?: (id: string) => void }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const color = HEALTH_COLOR[node.health];
+  const hot = node.isBottleneck || node.health === "CRITICAL";
 
   useFrame((state) => {
     if (!meshRef.current) return;
@@ -55,23 +56,31 @@ function NodeMesh({ node, selected, onSelect }: { node: TopologyNode; selected: 
         }}
       >
         <NodeGeometry kind={node.kind} />
-        <meshStandardMaterial
+        <meshPhysicalMaterial
           color={color}
           emissive={color}
-          emissiveIntensity={selected ? 0.9 : node.isBottleneck ? 0.5 : 0.2}
-          roughness={0.4}
+          emissiveIntensity={selected ? 1.3 : hot ? 0.85 : 0.22}
+          roughness={0.55}
           metalness={0.15}
+          clearcoat={0.25}
+          clearcoatRoughness={0.4}
         />
       </mesh>
-      {node.isBottleneck && (
+      {hot && (
         <mesh>
-          <sphereGeometry args={[0.62, 16, 16]} />
-          <meshBasicMaterial color={color} transparent opacity={0.12} />
+          <sphereGeometry args={[0.64, 20, 20]} />
+          <meshBasicMaterial color={color} transparent opacity={0.1} />
         </mesh>
       )}
-      <Text position={[0, 0.65, 0]} fontSize={0.22} color="#e2e8f0" anchorX="center" anchorY="bottom" outlineWidth={0.01} outlineColor="#0b1220">
-        {node.label}
-      </Text>
+      <group position={[0, 0.66, 0]}>
+        <mesh position={[0, 0, -0.01]}>
+          <planeGeometry args={[node.label.length * 0.1 + 0.16, 0.24]} />
+          <meshBasicMaterial color="#050810" transparent opacity={0.55} />
+        </mesh>
+        <Text fontSize={0.2} color="#e2e8f0" anchorX="center" anchorY="middle" font={undefined}>
+          {node.label}
+        </Text>
+      </group>
     </group>
   );
 }
@@ -87,6 +96,8 @@ function EdgeFlow({ edge, nodes }: { edge: TopologyEdge; nodes: Map<string, Topo
   }, [source, target]);
 
   const speed = useMemo(() => 1 / Math.max(edge.latencyMs, 50), [edge.latencyMs]);
+  const fragile = edge.fragility > 0.6;
+  const edgeColor = fragile ? "#e66767" : "#3987e5";
 
   useFrame((state) => {
     if (!pulseRef.current || !start || !end) return;
@@ -95,14 +106,13 @@ function EdgeFlow({ edge, nodes }: { edge: TopologyEdge; nodes: Map<string, Topo
   });
 
   if (!start || !end) return null;
-  const fragile = edge.fragility > 0.6;
 
   return (
     <>
-      <Line points={[start, end]} color={fragile ? "#d03b3b" : "#3987e5"} transparent opacity={0.25 + edge.fragility * 0.3} lineWidth={1} />
+      <Line points={[start, end]} color={edgeColor} transparent opacity={0.18 + edge.fragility * 0.25} lineWidth={1} />
       <mesh ref={pulseRef}>
-        <sphereGeometry args={[0.06, 8, 8]} />
-        <meshBasicMaterial color={fragile ? "#ec835a" : "#3987e5"} />
+        <sphereGeometry args={[0.055, 12, 12]} />
+        <meshBasicMaterial color={edgeColor} toneMapped={false} />
       </mesh>
     </>
   );
@@ -113,16 +123,45 @@ function Scene({ topology, selectedNodeId, onSelectNode }: { topology: TopologyG
 
   return (
     <>
-      <ambientLight intensity={0.55} />
-      <pointLight position={[10, 12, 8]} intensity={1.1} />
-      <pointLight position={[-10, -6, -8]} intensity={0.4} color="#3987e5" />
+      {/*
+        No <Environment> here on purpose: drei's HDRI presets fetch from a
+        third-party CDN at runtime, which (a) hung one of its mirror requests
+        during development, permanently stalling the Suspense boundary and
+        blanking the whole scene, and (b) is a real reliability problem for a
+        self-hosted product that may run with restricted internet egress.
+        hemisphereLight gives a comparable soft sky/ground tint with zero
+        network dependency.
+      */}
+      <color attach="background" args={["#060912"]} />
+      <fog attach="fog" args={["#060912", 14, 34]} />
+      <hemisphereLight args={["#8bb4ff", "#1a1206", 0.5]} />
+      <ambientLight intensity={0.4} />
+      <pointLight position={[8, 10, 6]} intensity={1.1} />
+      <pointLight position={[-8, -4, -6]} intensity={0.5} color="#3987e5" />
+
       {topology.edges.map((edge) => (
         <EdgeFlow key={edge.id} edge={edge} nodes={nodeMap} />
       ))}
       {topology.nodes.map((node) => (
         <NodeMesh key={node.id} node={node} selected={node.id === selectedNodeId} onSelect={onSelectNode} />
       ))}
-      <OrbitControls enablePan enableZoom enableRotate minDistance={4} maxDistance={30} />
+
+      <Grid
+        position={[0, -1.3, 0]}
+        args={[40, 40]}
+        cellSize={1}
+        cellThickness={0.5}
+        cellColor="#1b2842"
+        sectionSize={5}
+        sectionThickness={1}
+        sectionColor="#2c3e63"
+        fadeDistance={26}
+        fadeStrength={1.5}
+        infiniteGrid
+      />
+      <ContactShadows position={[0, -1.29, 0]} opacity={0.4} scale={24} blur={2.4} far={4} color="#000000" />
+
+      <OrbitControls enablePan enableZoom enableRotate minDistance={4} maxDistance={30} autoRotate autoRotateSpeed={0.4} maxPolarAngle={Math.PI / 1.9} />
     </>
   );
 }
@@ -159,9 +198,10 @@ export function TopologyCanvas({
   }
 
   return (
-    <div style={{ height }} className="overflow-hidden rounded-lg border border-surface-border bg-[#070c16]">
+    <div style={{ height }} className="overflow-hidden rounded-lg border border-surface-border bg-[#060912] shadow-[inset_0_0_60px_rgba(0,0,0,0.5)]">
       <Canvas
         key={mountKey}
+        dpr={[1, 1.5]}
         camera={{ position: [8, 6, 10], fov: 50 }}
         onCreated={({ gl }) => {
           gl.domElement.addEventListener(

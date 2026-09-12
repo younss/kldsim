@@ -1,0 +1,324 @@
+// KLD Sim data model.
+//
+// Nested, always-read-as-a-unit structures (scenario topology/personas/timeline,
+// team metrics/topology, decisions, round results) are stored as Json columns
+// rather than normalized into join tables. They are never queried by sub-field
+// at the SQL level in this application — always loaded whole and interpreted by
+// the simulation engine in packages/shared — so normalizing them would only add
+// migration churn without buying real query power.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlatformRole {
+  PLATFORM_ADMIN
+  FACILITATOR
+  PLAYER
+}
+
+enum LLMProviderKind {
+  OLLAMA
+  GEMINI
+  CLAUDE
+  OPENAI
+}
+
+enum ScenarioStatus {
+  DRAFT
+  VALIDATED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SessionStatus {
+  LOBBY
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+}
+
+enum DecisionStatus {
+  DRAFT
+  SUBMITTED
+  RESOLVED
+}
+
+enum NegotiationSpeaker {
+  PLAYER
+  PERSONA
+  SYSTEM
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  providerConfigs ProviderConfig[]
+  scenarios       Scenario[]
+  gameSessions    GameSession[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String       @id @default(uuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  displayName  String
+  role         PlatformRole
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  refreshTokens    RefreshToken[]
+  facilitatedGames GameSession[]     @relation("FacilitatedSessions")
+  teamMemberships  TeamMember[]
+  scenariosAuthored Scenario[]       @relation("ScenarioAuthor")
+  decisionsSubmitted Decision[]      @relation("DecisionSubmitter")
+  negotiationMessages NegotiationMessage[]
+  facilitatorOverrides FacilitatorOverrideLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model ProviderConfig {
+  id              String           @id @default(uuid())
+  tenantId        String
+  provider        LLMProviderKind
+  model           String
+  baseUrl         String?
+  encryptedApiKey String?
+  isDefault       Boolean          @default(false)
+  enabled         Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("provider_configs")
+}
+
+model Scenario {
+  id              String         @id @default(uuid())
+  tenantId        String
+  status          ScenarioStatus @default(DRAFT)
+  title           String
+  industry        String
+  narrative       String
+  authoringPrompt String
+  objectives      Json
+  winConditions   Json
+  lossConditions  Json
+  totalRounds     Int
+  roundBudget     Float
+  baselineMetrics Json
+  topology        Json
+  personas        Json
+  timeline        Json
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author       User          @relation("ScenarioAuthor", fields: [createdBy], references: [id])
+  gameSessions GameSession[]
+
+  @@index([tenantId, status])
+  @@map("scenarios")
+}
+
+model GameSession {
+  id                   String        @id @default(uuid())
+  tenantId             String
+  scenarioId           String
+  facilitatorId        String
+  status               SessionStatus @default(LOBBY)
+  currentRound         Int           @default(1)
+  roundDurationSeconds Int           @default(600)
+  roundStartedAt       DateTime?
+  pausedAt             DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scenario    Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  facilitator User     @relation("FacilitatedSessions", fields: [facilitatorId], references: [id])
+
+  teams               Team[]
+  telemetryEvents      TelemetryEvent[]
+  facilitatorOverrides FacilitatorOverrideLog[]
+
+  @@index([tenantId, status])
+  @@map("game_sessions")
+}
+
+model Team {
+  id         String   @id @default(uuid())
+  sessionId  String
+  name       String
+  metrics    Json
+  topology   Json
+  eliminated Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  session GameSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  members TeamMember[]
+
+  decisions            Decision[]
+  roundResults         RoundResult[]
+  negotiationMessages  NegotiationMessage[]
+  personaTrustStates   PersonaTrustState[]
+  telemetryEvents      TelemetryEvent[]
+
+  @@unique([sessionId, name])
+  @@index([sessionId])
+  @@map("teams")
+}
+
+model TeamMember {
+  id     String @id @default(uuid())
+  teamId String
+  userId String
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+model Decision {
+  id                 String         @id @default(uuid())
+  sessionId          String
+  teamId             String
+  roundNumber        Int
+  status             DecisionStatus @default(DRAFT)
+  allocation         Json
+  nodeActions        Json
+  rationale          String         @default("")
+  submittedAt        DateTime?
+  submittedByUserId  String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  team            Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  submittedByUser User? @relation("DecisionSubmitter", fields: [submittedByUserId], references: [id])
+
+  @@unique([teamId, roundNumber])
+  @@index([sessionId, roundNumber])
+  @@map("decisions")
+}
+
+model RoundResult {
+  id            String   @id @default(uuid())
+  sessionId     String
+  teamId        String
+  roundNumber   Int
+  metricsBefore Json
+  metricsAfter  Json
+  appliedEvents Json
+  narrative     String
+  resolvedAt    DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, roundNumber])
+  @@index([sessionId, roundNumber])
+  @@map("round_results")
+}
+
+model NegotiationMessage {
+  id               String             @id @default(uuid())
+  sessionId        String
+  teamId           String
+  personaId        String
+  roundNumber      Int
+  speaker          NegotiationSpeaker
+  authorUserId     String?
+  content          String
+  /// Populated only for PERSONA messages produced by a scored proposal evaluation (null for free-chat replies).
+  trustDelta       Float?
+  evaluationDetail Json?
+  createdAt        DateTime           @default(now())
+
+  team       Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  authorUser User? @relation(fields: [authorUserId], references: [id])
+
+  @@index([teamId, personaId, roundNumber])
+  @@map("negotiation_messages")
+}
+
+model PersonaTrustState {
+  id           String   @id @default(uuid())
+  sessionId    String
+  teamId       String
+  personaId    String
+  currentTrust Float
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, personaId])
+  @@map("persona_trust_states")
+}
+
+model TelemetryEvent {
+  id        String   @id @default(uuid())
+  sessionId String
+  teamId    String?
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  team    Team?       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("telemetry_events")
+}
+
+model FacilitatorOverrideLog {
+  id            String   @id @default(uuid())
+  sessionId     String
+  facilitatorId String
+  kind          String
+  payload       Json
+  issuedAt      DateTime @default(now())
+
+  session     GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  facilitator User        @relation(fields: [facilitatorId], references: [id])
+
+  @@index([sessionId])
+  @@map("facilitator_override_logs")
+}

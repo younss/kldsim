@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-surface text-slate-100 antialiased;
+  }
+  ::selection {
+    @apply bg-brand-500/40;
+  }
+}
+
+@layer components {
+  .docs-prose {
+    @apply text-sm leading-relaxed text-slate-300;
+  }
+  .docs-prose h1 {
+    @apply mb-4 text-2xl font-semibold text-white;
+  }
+  .docs-prose h2 {
+    @apply mb-3 mt-8 text-lg font-semibold text-white first:mt-0;
+  }
+  .docs-prose h3 {
+    @apply mb-2 mt-5 text-sm font-semibold uppercase tracking-wide text-slate-300;
+  }
+  .docs-prose p {
+    @apply mb-4;
+  }
+  .docs-prose ul {
+    @apply mb-4 list-disc space-y-1 pl-5;
+  }
+  .docs-prose ol {
+    @apply mb-4 list-decimal space-y-1 pl-5;
+  }
+  .docs-prose code {
+    @apply rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.85em] text-brand-300;
+  }
+  .docs-prose pre {
+    @apply mb-4 overflow-x-auto rounded-lg border border-surface-border bg-surface p-4;
+  }
+  .docs-prose pre code {
+    @apply bg-transparent p-0 text-slate-200;
+  }
+  .docs-prose blockquote {
+    @apply mb-4 border-l-2 border-brand-500/50 pl-4 italic text-slate-400;
+  }
+  .docs-prose table {
+    @apply mb-4 w-full border-collapse text-xs;
+  }
+  .docs-prose th {
+    @apply border border-surface-border bg-white/5 px-3 py-1.5 text-left font-medium text-slate-300;
+  }
+  .docs-prose td {
+    @apply border border-surface-border px-3 py-1.5 align-top text-slate-400;
+  }
+  .docs-prose a {
+    @apply text-brand-400 hover:underline;
+  }
+  .docs-prose strong {
+    @apply text-slate-100;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: theme("colors.surface.border");
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

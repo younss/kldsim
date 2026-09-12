@@ -1,0 +1,114 @@
+# Rootless-Podman-friendly multi-container stack for KLD Sim.
+# Quick start:
+#   cp .env.example .env   # then edit the secrets
+#   podman-compose up --build
+# The app is served at http://localhost:${WEB_PORT:-8080}
+
+networks:
+  kldsim:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kldsim}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kldsim_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-kldsim}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [kldsim]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kldsim} -d ${POSTGRES_DB:-kldsim}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks: [kldsim]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: docker.io/ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [kldsim]
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  ollama-init:
+    image: docker.io/ollama/ollama:latest
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["ollama", "pull", "${OLLAMA_DEFAULT_MODEL:-gemma3:4b}"]
+    networks: [kldsim]
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/containerfiles/api.Containerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-kldsim}:${POSTGRES_PASSWORD:-kldsim_dev_password}@postgres:5432/${POSTGRES_DB:-kldsim}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?Set MASTER_ENCRYPTION_KEY in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-gemma3:4b}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: [kldsim]
+    ports:
+      - "${API_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/containerfiles/web.Containerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [kldsim]
+    ports:
+      - "${WEB_PORT:-8080}:8080"

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SOCKET_EVENTS, type StudioGenerationCompletedPayload, type StudioGenerationFailedPayload, type StudioGenerationProgressPayload } from "@kldsim/shared";
-import { api } from "../lib/apiClient";
+import { api, ApiError } from "../lib/apiClient";
 import { connectSocket } from "../lib/socketClient";
 import { useSocketEvent } from "../hooks/useSocketEvent";
 import { Card } from "../components/common/Card";
@@ -73,10 +73,15 @@ export default function StudioGeneratePage() {
       setJobId(data.jobId);
     } catch (err) {
       setPhase("failed");
-      setError(err instanceof Error ? err.message : "Failed to queue generation");
+      if (err instanceof ApiError && err.issues && err.issues.length > 0) {
+        setError(err.issues.map((i) => (i.path ? `${i.path}: ${i.message}` : i.message)).join(" · "));
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to queue generation");
+      }
     }
   }
 
+  const roundsValid = Number.isInteger(totalRounds) && totalRounds >= 3 && totalRounds <= 20;
   const busy = phase === "queued" || phase === "generating" || phase === "validating";
 
   return (
@@ -118,11 +123,15 @@ export default function StudioGeneratePage() {
                 type="number"
                 min={3}
                 max={20}
-                value={totalRounds}
-                onChange={(e) => setTotalRounds(Number(e.target.value))}
+                value={Number.isNaN(totalRounds) ? "" : totalRounds}
+                onChange={(e) => setTotalRounds(e.target.value === "" ? NaN : Number(e.target.value))}
+                onBlur={() => setTotalRounds(Math.min(20, Math.max(3, Number.isNaN(totalRounds) ? 8 : Math.round(totalRounds))))}
                 disabled={busy}
-                className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-sm text-white outline-none focus:border-brand-500"
+                className={`w-full rounded-md border bg-surface px-3 py-2 text-sm text-white outline-none focus:border-brand-500 ${
+                  roundsValid ? "border-surface-border" : "border-health-critical/60"
+                }`}
               />
+              {!roundsValid && <p className="mt-1 text-xs text-health-critical">Must be 3–20</p>}
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-400">Difficulty</label>
@@ -149,7 +158,7 @@ export default function StudioGeneratePage() {
 
           <button
             onClick={handleSubmit}
-            disabled={busy || prompt.trim().length < 20}
+            disabled={busy || prompt.trim().length < 20 || !roundsValid}
             className="w-full rounded-md bg-brand-600 py-2.5 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-40"
           >
             {busy ? "Generating…" : "Generate scenario"}

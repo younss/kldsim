@@ -11,7 +11,6 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  ollama_data:
 
 services:
   postgres:
@@ -43,31 +42,10 @@ services:
       timeout: 5s
       retries: 10
 
-  ollama:
-    image: docker.io/ollama/ollama:latest
-    restart: unless-stopped
-    volumes:
-      - ollama_data:/root/.ollama
-    networks: [kldsim]
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 10s
-      retries: 15
-      start_period: 30s
-
-  ollama-init:
-    image: docker.io/ollama/ollama:latest
-    restart: "no"
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      OLLAMA_HOST: "http://ollama:11434"
-    entrypoint: ["ollama", "pull", "${OLLAMA_DEFAULT_MODEL:-gemma3:4b}"]
-    networks: [kldsim]
+  # Ollama is NOT containerized here — it points at the Ollama instance
+  # already installed and running natively on the host (see api's
+  # OLLAMA_BASE_URL below), which gets GPU acceleration and the full host
+  # memory instead of being boxed into the Podman VM's limited RAM.
 
   api:
     build:
@@ -88,7 +66,9 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:?Set MASTER_ENCRYPTION_KEY in .env}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
-      OLLAMA_BASE_URL: "http://ollama:11434"
+      # host.containers.internal reaches the Mac host from inside the Podman
+      # VM — points at the Ollama app already installed/running natively.
+      OLLAMA_BASE_URL: "http://host.containers.internal:11434"
       OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-gemma3:4b}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     networks: [kldsim]
